@@ -785,6 +785,15 @@ class DataFetcherManager:
         # 构建优先级说明
         priority_info = ", ".join([f"{f.name}(P{f.priority})" for f in self._fetchers])
         logger.info(f"已初始化 {len(self._fetchers)} 个数据源（按优先级）: {priority_info}")
+
+        # 明确打印 TwelveData 可用状态，便于排查配置问题
+        twelvedata_fetcher = next((f for f in self._fetchers if f.name == "TwelveDataFetcher"), None)
+        if twelvedata_fetcher is not None:
+            td_ready = getattr(twelvedata_fetcher, "is_api_ready", lambda: False)()
+            if td_ready:
+                logger.info("[TwelveDataFetcher] ✅ TWELVEDATA_API_KEY 已配置，美股/港股 API 优先链已激活")
+            else:
+                logger.debug("[TwelveDataFetcher] TWELVEDATA_API_KEY 未配置或已禁用，美股/港股将回退到 Yfinance")
     
 
     def add_fetcher(self, fetcher: BaseFetcher) -> None:
