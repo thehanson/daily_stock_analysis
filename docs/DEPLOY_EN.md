@@ -83,6 +83,8 @@ Data is automatically saved to host directories:
 - `./logs/` - Log files
 - `./reports/` - Analysis reports
 
+> **Cloud Database**: If `DATABASE_URL` (e.g. PostgreSQL / MySQL) is configured in `.env`, data will be read from and written to that external database instead of the local SQLite file under `./data/`. This is useful for data synchronization and persistence across separate runtime environments.
+
 ---
 
 ## Option 2: Direct Deployment

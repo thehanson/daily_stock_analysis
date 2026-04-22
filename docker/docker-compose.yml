@@ -39,6 +39,9 @@ x-common: &common
     # 代理设置（如果需要）
     # - http_proxy=http://host.docker.internal:10809
     # - https_proxy=http://host.docker.internal:10809
+
+    # 外部数据库连接（可选，配置后优先使用，未配置则使用本地 SQLite）
+    # - DATABASE_URL=postgresql://user:pass@host:5432/dbname
   logging:
     driver: "json-file"
     options:

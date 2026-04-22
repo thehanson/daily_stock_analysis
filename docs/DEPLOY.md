@@ -87,6 +87,8 @@ docker-compose -f ./docker/docker-compose.yml exec stock-analyzer python main.py
 - `./logs/` - 日志文件
 - `./reports/` - 分析报告
 
+> **云端数据库**：若在 `.env` 中配置了 `DATABASE_URL`（如 PostgreSQL / MySQL），数据将读写到该外部数据库，而非本地 `./data/` 下的 SQLite 文件。适用于多端分离运行时的数据同步与持久化。
+
 ---
 
 ## 🖥️ 方案二：直接部署
