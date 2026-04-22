@@ -669,7 +669,10 @@ PUSHOVER_API_TOKEN=your_api_token
 
 ### Twelve Data
 - 无需开户，只需配置 `TWELVEDATA_API_KEY`
-- 历史日线使用 Twelve Data `time_series` 接口；最新价格使用 `price` 接口
+- 历史日线使用 Twelve Data 官方 `time_series` 接口；实时行情使用官方 `quote` 接口
+- `quote` 会直接映射价格、涨跌幅、成交量、开盘价、最高价、最低价、昨收与 52 周高低点
+- 量比会基于 Twelve Data `time_series` 的最近 5 个已完成日线成交量补算；换手率会优先基于 Twelve Data `statistics.stock_statistics.float_shares` 计算，缺失时回退 `shares_outstanding`
+- 若当前 Twelve Data 套餐不支持 `statistics` 或返回字段不完整，`turnover_rate` 会优雅降级为 `None`，后续仍可由其他数据源补充
 - 港股代码在必要时会通过 `symbol_search` 做 symbol 归一；常用配置项：
   - `TWELVEDATA_API_KEY`
   - `TWELVEDATA_PRIORITY`（默认 `2`）

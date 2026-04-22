@@ -79,7 +79,32 @@ def test_get_realtime_quote_returns_unified_quote():
     with patch.object(fetcher, "_resolve_symbol", return_value="AAPL"), patch.object(
         fetcher,
         "_request",
-        return_value={"price": "201.23"},
+        side_effect=[
+            {
+                "name": "Apple Inc.",
+                "close": "201.23",
+                "open": "199.50",
+                "high": "202.00",
+                "low": "198.75",
+                "previous_close": "198.00",
+                "change": "3.23",
+                "percent_change": "1.63",
+                "volume": "1200000",
+                "datetime": "2026-04-08",
+                "fifty_two_week": {"high": "220.00", "low": "150.00"},
+            },
+            {
+                "values": [
+                    {"datetime": "2026-04-08", "volume": "1100000"},
+                    {"datetime": "2026-04-07", "volume": "1000000"},
+                    {"datetime": "2026-04-04", "volume": "900000"},
+                    {"datetime": "2026-04-03", "volume": "800000"},
+                    {"datetime": "2026-04-02", "volume": "700000"},
+                    {"datetime": "2026-04-01", "volume": "600000"},
+                ]
+            },
+            {"stock_statistics": {"float_shares": "60000000"}},
+        ],
     ) as mock_request:
         quote = fetcher.get_realtime_quote("AAPL")
 
@@ -87,8 +112,82 @@ def test_get_realtime_quote_returns_unified_quote():
     assert quote.code == "AAPL"
     assert quote.name == "Apple Inc."
     assert quote.price == 201.23
+    assert quote.change_pct == 1.63
+    assert quote.change_amount == 3.23
+    assert quote.volume == 1200000
+    assert quote.volume_ratio == 1.5
+    assert quote.turnover_rate == 2.0
+    assert quote.open_price == 199.5
+    assert quote.high == 202.0
+    assert quote.low == 198.75
+    assert quote.pre_close == 198.0
+    assert quote.amplitude == pytest.approx(1.6414, rel=1e-4)
+    assert quote.high_52w == 220.0
+    assert quote.low_52w == 150.0
     assert quote.source == RealtimeSource.TWELVEDATA
-    mock_request.assert_called_once_with("price", {"symbol": "AAPL", "dp": 4})
+    assert mock_request.call_args_list == [
+        (("quote", {"symbol": "AAPL", "dp": 4}),),
+        (
+            (
+                "time_series",
+                {
+                    "symbol": "AAPL",
+                    "interval": "1day",
+                    "outputsize": 6,
+                    "order": "desc",
+                    "format": "JSON",
+                },
+            ),
+        ),
+        (( "statistics", {"symbol": "AAPL"}),),
+    ]
+
+
+def test_get_realtime_quote_leaves_turnover_rate_empty_when_statistics_unavailable():
+    fetcher = _make_fetcher()
+    fetcher._stock_name_cache["AAPL"] = "Apple Inc."
+
+    with patch.object(fetcher, "_resolve_symbol", return_value="AAPL"), patch.object(
+        fetcher,
+        "_request",
+        side_effect=[
+            {
+                "name": "Apple Inc.",
+                "close": "201.23",
+                "volume": "1200000",
+                "datetime": "2026-04-08",
+            },
+            {
+                "values": [
+                    {"datetime": "2026-04-08", "volume": "1100000"},
+                    {"datetime": "2026-04-07", "volume": "1000000"},
+                    {"datetime": "2026-04-04", "volume": "900000"},
+                    {"datetime": "2026-04-03", "volume": "800000"},
+                    {"datetime": "2026-04-02", "volume": "700000"},
+                    {"datetime": "2026-04-01", "volume": "600000"},
+                ]
+            },
+            Exception("statistics plan gated"),
+        ],
+    ):
+        quote = fetcher.get_realtime_quote("AAPL")
+
+    assert quote is not None
+    assert quote.volume_ratio == 1.5
+    assert quote.turnover_rate is None
+
+
+def test_get_realtime_quote_returns_none_when_quote_has_no_price():
+    fetcher = _make_fetcher()
+
+    with patch.object(fetcher, "_resolve_symbol", return_value="AAPL"), patch.object(
+        fetcher,
+        "_request",
+        return_value={"name": "Apple Inc."},
+    ):
+        quote = fetcher.get_realtime_quote("AAPL")
+
+    assert quote is None
 
 
 def test_normalize_data_rejects_missing_volume():

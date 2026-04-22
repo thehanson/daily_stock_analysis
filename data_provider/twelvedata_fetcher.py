@@ -11,6 +11,7 @@ TwelveDataFetcher - Twelve Data API 数据源 (Priority 2)
 
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -335,35 +336,175 @@ class TwelveDataFetcher(BaseFetcher):
                 normalized[column] = None
         return normalized[STANDARD_COLUMNS]
 
+    @staticmethod
+    def _parse_date_token(value: Any) -> Optional[str]:
+        """Extract YYYY-MM-DD from Twelve Data date/datetime fields."""
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace(" ", "T")).date().isoformat()
+        except ValueError:
+            return raw[:10] if len(raw) >= 10 else None
+
+    def _compute_volume_ratio(
+        self,
+        symbol: str,
+        current_volume: Optional[int],
+        *,
+        current_date: Optional[str] = None,
+    ) -> Optional[float]:
+        """Compute volume_ratio as current volume / previous 5 daily average volume.
+
+        This mirrors the repository-wide volume_ratio semantics used for other
+        providers: compare today's/live volume against the latest five completed
+        daily bars, excluding the current session when present.
+        """
+        if not current_volume or current_volume <= 0:
+            return None
+
+        try:
+            payload = self._request(
+                "time_series",
+                {
+                    "symbol": symbol,
+                    "interval": "1day",
+                    "outputsize": 6,
+                    "order": "desc",
+                    "format": "JSON",
+                },
+            )
+        except Exception as exc:
+            logger.debug("[TwelveDataFetcher] 量比补算失败(symbol=%s): %s", symbol, exc)
+            return None
+
+        values = payload.get("values") if isinstance(payload, dict) else None
+        if not isinstance(values, list) or not values:
+            return None
+
+        history_rows = values
+        if current_date:
+            latest_date = self._parse_date_token(values[0].get("datetime")) if isinstance(values[0], dict) else None
+            if latest_date == current_date:
+                history_rows = values[1:]
+
+        historical_volumes: List[float] = []
+        for row in history_rows:
+            if not isinstance(row, dict):
+                continue
+            volume = safe_float(row.get("volume"))
+            if volume and volume > 0:
+                historical_volumes.append(float(volume))
+            if len(historical_volumes) >= 5:
+                break
+
+        if not historical_volumes:
+            return None
+
+        avg_volume = sum(historical_volumes) / len(historical_volumes)
+        if avg_volume <= 0:
+            return None
+        return round(float(current_volume) / avg_volume, 4)
+
+    def _compute_turnover_rate(self, symbol: str, current_volume: Optional[int]) -> Optional[float]:
+        """Compute turnover_rate from Twelve Data statistics when plan allows it.
+
+        Official Twelve Data statistics responses include `stock_statistics`
+        fields such as `float_shares` and `shares_outstanding`.  When the
+        endpoint is unavailable for the current plan, we fail open and leave
+        turnover_rate as None so downstream supplement logic can still use
+        other providers.
+        """
+        if not current_volume or current_volume <= 0:
+            return None
+
+        try:
+            payload = self._request("statistics", {"symbol": symbol})
+        except Exception as exc:
+            logger.debug("[TwelveDataFetcher] 换手率补算失败(symbol=%s): %s", symbol, exc)
+            return None
+
+        stock_statistics = payload.get("stock_statistics") if isinstance(payload, dict) else None
+        if not isinstance(stock_statistics, dict):
+            return None
+
+        shares_base = (
+            safe_float(stock_statistics.get("float_shares"))
+            or safe_float(stock_statistics.get("shares_outstanding"))
+        )
+        if not shares_base or shares_base <= 0:
+            return None
+        return round(float(current_volume) / float(shares_base) * 100, 4)
+
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
+
+
         if not self._is_available() or not self._is_supported_market(stock_code):
             return None
 
         normalized = normalize_stock_code(stock_code).strip().upper()
         symbol = self._resolve_symbol(normalized)
-        logger.info("[TwelveDataFetcher] 请求实时价格: symbol=%s code=%s", symbol, normalized)
+        logger.info("[TwelveDataFetcher] 请求实时行情: symbol=%s code=%s", symbol, normalized)
 
         try:
-            payload = self._request("price", {"symbol": symbol, "dp": 4})
+            payload = self._request("quote", {"symbol": symbol, "dp": 4})
         except Exception as exc:
             logger.warning(
-                "[TwelveDataFetcher] 实时价格失败，将交由后续 fetcher fallback: symbol=%s reason=%s",
+                "[TwelveDataFetcher] 实时行情失败，将交由后续 fetcher fallback: symbol=%s reason=%s",
                 symbol,
                 exc,
             )
             return None
 
-        price = safe_float(payload.get("price")) if isinstance(payload, dict) else None
+        price = safe_float(payload.get("close")) if isinstance(payload, dict) else None
+        if price is None or price <= 0:
+            price = safe_float(payload.get("price")) if isinstance(payload, dict) else None
         if price is None or price <= 0:
             logger.warning(
-                "[TwelveDataFetcher] 实时价格缺失，将交由后续 fetcher fallback: symbol=%s",
+                "[TwelveDataFetcher] 实时行情缺失关键价格字段，将交由后续 fetcher fallback: symbol=%s",
                 symbol,
             )
             return None
 
+        current_volume = None
+        raw_volume = safe_float(payload.get("volume")) if isinstance(payload, dict) else None
+        if raw_volume is not None and raw_volume > 0:
+            current_volume = int(raw_volume)
+
+        previous_close = safe_float(payload.get("previous_close")) if isinstance(payload, dict) else None
+        high = safe_float(payload.get("high")) if isinstance(payload, dict) else None
+        low = safe_float(payload.get("low")) if isinstance(payload, dict) else None
+        amplitude = None
+        if previous_close and previous_close > 0 and high is not None and low is not None:
+            amplitude = round((high - low) / previous_close * 100, 4)
+
+        current_date = self._parse_date_token(payload.get("datetime")) if isinstance(payload, dict) else None
+        volume_ratio = self._compute_volume_ratio(
+            symbol,
+            current_volume,
+            current_date=current_date,
+        )
+        turnover_rate = self._compute_turnover_rate(symbol, current_volume)
+
+        fifty_two_week = payload.get("fifty_two_week") if isinstance(payload, dict) else None
+        high_52w = safe_float(fifty_two_week.get("high")) if isinstance(fifty_two_week, dict) else None
+        low_52w = safe_float(fifty_two_week.get("low")) if isinstance(fifty_two_week, dict) else None
+
         return UnifiedRealtimeQuote(
             code=normalized,
-            name=self._stock_name_cache.get(normalized, ""),
+            name=str(payload.get("name") or self._stock_name_cache.get(normalized, "")).strip(),
             source=RealtimeSource.TWELVEDATA,
             price=price,
+            change_pct=safe_float(payload.get("percent_change")) if isinstance(payload, dict) else None,
+            change_amount=safe_float(payload.get("change")) if isinstance(payload, dict) else None,
+            volume=current_volume,
+            volume_ratio=volume_ratio,
+            turnover_rate=turnover_rate,
+            amplitude=amplitude,
+            open_price=safe_float(payload.get("open")) if isinstance(payload, dict) else None,
+            high=high,
+            low=low,
+            pre_close=previous_close,
+            high_52w=high_52w,
+            low_52w=low_52w,
         )

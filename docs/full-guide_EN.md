@@ -521,7 +521,10 @@ System defaults to AkShare (free), also supports other data sources:
 
 ### Twelve Data
 - No brokerage account required; only `TWELVEDATA_API_KEY` is needed
-- Historical daily bars use the Twelve Data `time_series` endpoint; latest price uses the `price` endpoint
+- Historical daily bars use the official Twelve Data `time_series` endpoint; realtime quotes use the official `quote` endpoint
+- `quote` now maps price, change, percent change, volume, open, high, low, previous close, and 52-week high/low directly
+- `volume_ratio` is computed from the latest five completed daily volumes via Twelve Data `time_series`; `turnover_rate` is computed from `statistics.stock_statistics.float_shares`, with `shares_outstanding` as a fallback
+- If the current Twelve Data plan does not expose `statistics` or returns incomplete fields, `turnover_rate` gracefully falls back to `None` so downstream providers can still supplement it
 - Relevant configuration:
 - `TWELVEDATA_API_KEY`
 - `TWELVEDATA_PRIORITY` (default `2`)

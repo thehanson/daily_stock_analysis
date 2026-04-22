@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [新功能] 支持通过 `DATABASE_URL` 环境变量直连外部云端数据库（如 Supabase PostgreSQL），解决本地与 GitHub Actions 之间的数据同步与持久化问题；未配置时自动回退至本地 SQLite。
+- [改进] Twelve Data 实时行情接入从 `price` 升级为 `quote`，美股/港股在免开户链路下可直接返回价格、涨跌幅、成交量、开高低昨收，并基于 Twelve Data 官方 `time_series` / `statistics` 接口补算量比与换手率（计划不支持时优雅降级为 `None`）。
 - [修复] `DATABASE_URL` 现在会被配置层正确读取并优先用于 SQLAlchemy 连接；修复 GitHub Actions 配置了 Supabase / PostgreSQL 后仍静默回退到本地 SQLite、导致云端库没有分析历史和回测数据的问题。
 - [修复] LLM 分析成功日志改为记录实际生效模型；当主模型失败并切换到 fallback 模型时，日志与用量统计不再误报为主模型成功。
 - [修复] 大盘复盘链路改为使用独立的 Markdown 系统提示，不再继承个股“决策仪表盘 JSON”系统提示，避免市场复盘输出与格式要求冲突。

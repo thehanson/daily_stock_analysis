@@ -74,7 +74,7 @@
 | 新闻搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
 | 社交舆情 | [Stock Sentiment API](https://api.adanos.org/docs)（Reddit / X / Polymarket，仅美股，可选） |
 
-> **美股/港股 API 优先策略**：系统会先收集所有**已配置且可用**的 API 型数据源，并按 `priority` 从小到大尝试；`YfinanceFetcher` 永远固定在最后兜底。仅配置 Twelve Data 时：`TwelveDataFetcher -> YfinanceFetcher`；仅配置 Longbridge 时：`LongbridgeFetcher -> YfinanceFetcher`；同时配置 Twelve Data 和 Longbridge 时：默认按 `TWELVEDATA_PRIORITY=2`、`LONGBRIDGE_PRIORITY=5` 形成 `TwelveDataFetcher -> LongbridgeFetcher -> YfinanceFetcher`。若未配置任何 API 型数据源，则保持原有行为，仅使用 `YfinanceFetcher`。**美股大盘指数**（如 SPX）继续保持 YFinance 优先；**A 股**路由不变，仍为 Efinance → AkShare → Tushare → Pytdx → Baostock。详见 `.env.example` 与 [完整指南](docs/full-guide.md)。
+> **美股/港股 API 优先策略**：系统会先收集所有**已配置且可用**的 API 型数据源，并按 `priority` 从小到大尝试；`YfinanceFetcher` 永远固定在最后兜底。仅配置 Twelve Data 时：`TwelveDataFetcher -> YfinanceFetcher`；仅配置 Longbridge 时：`LongbridgeFetcher -> YfinanceFetcher`；同时配置 Twelve Data 和 Longbridge 时：默认按 `TWELVEDATA_PRIORITY=2`、`LONGBRIDGE_PRIORITY=5` 形成 `TwelveDataFetcher -> LongbridgeFetcher -> YfinanceFetcher`。若未配置任何 API 型数据源，则保持原有行为，仅使用 `YfinanceFetcher`。**美股大盘指数**（如 SPX）继续保持 YFinance 优先；**A 股**路由不变，仍为 Efinance → AkShare → Tushare → Pytdx → Baostock。Twelve Data 当前会用官方 `quote` 实时行情接口返回价格、涨跌幅、成交量、开高低昨收，并基于官方 `time_series` / `statistics` 接口尽力补算量比与换手率；若当前套餐不支持对应接口，缺失字段会优雅降级为 `None`。详见 `.env.example` 与 [完整指南](docs/full-guide.md)。
 
 ### 内置交易纪律
 
