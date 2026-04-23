@@ -14,6 +14,7 @@ if "json_repair" not in sys.modules:
     sys.modules["json_repair"] = MagicMock()
 
 from data_provider.base import DataFetcherManager
+from data_provider.realtime_types import RealtimeSource, UnifiedRealtimeQuote
 
 
 class _DummyFetcher:
@@ -36,6 +37,33 @@ class _DummyQuote:
     @staticmethod
     def has_basic_data():
         return True
+
+
+def _make_quote(
+    *,
+    code: str,
+    source: RealtimeSource,
+    price: float = 100.0,
+    volume_ratio=None,
+    turnover_rate=None,
+    amplitude=None,
+    pe_ratio=None,
+    pb_ratio=None,
+    total_mv=None,
+    circ_mv=None,
+):
+    return UnifiedRealtimeQuote(
+        code=code,
+        source=source,
+        price=price,
+        volume_ratio=volume_ratio,
+        turnover_rate=turnover_rate,
+        amplitude=amplitude,
+        pe_ratio=pe_ratio,
+        pb_ratio=pb_ratio,
+        total_mv=total_mv,
+        circ_mv=circ_mv,
+    )
 
 
 class TestHKRealtimeRouting(unittest.TestCase):
@@ -69,7 +97,23 @@ class TestHKRealtimeRouting(unittest.TestCase):
             realtime_source_priority="tencent,akshare_sina,efinance,akshare_em,tushare",
         )
 
-        twelvedata = _DummyFetcher("TwelveDataFetcher", 2, result=_DummyQuote(), api_ready=True)
+        twelvedata = _DummyFetcher(
+            "TwelveDataFetcher",
+            2,
+            result=_make_quote(
+                code="HK01810",
+                source=RealtimeSource.TWELVEDATA,
+                price=88.0,
+                volume_ratio=1.1,
+                turnover_rate=0.8,
+                amplitude=2.3,
+                pe_ratio=18.0,
+                pb_ratio=3.2,
+                total_mv=400_000_000.0,
+                circ_mv=350_000_000.0,
+            ),
+            api_ready=True,
+        )
         longbridge = _DummyFetcher("LongbridgeFetcher", 5, result=_DummyQuote(), api_ready=True)
         yfinance = _DummyFetcher("YfinanceFetcher", 0, result=_DummyQuote())
         akshare = _DummyFetcher("AkshareFetcher", 1, result=_DummyQuote())
@@ -90,7 +134,22 @@ class TestHKRealtimeRouting(unittest.TestCase):
             realtime_source_priority="tencent,akshare_sina,efinance,akshare_em,tushare",
         )
 
-        yfinance = _DummyFetcher("YfinanceFetcher", 0, result=_DummyQuote())
+        yfinance = _DummyFetcher(
+            "YfinanceFetcher",
+            0,
+            result=_make_quote(
+                code="SPX",
+                source=RealtimeSource.FALLBACK,
+                price=5000.0,
+                volume_ratio=1.0,
+                turnover_rate=0.5,
+                amplitude=1.1,
+                pe_ratio=21.0,
+                pb_ratio=4.1,
+                total_mv=2_000_000_000.0,
+                circ_mv=1_900_000_000.0,
+            ),
+        )
         twelvedata = _DummyFetcher("TwelveDataFetcher", 2, result=_DummyQuote(), api_ready=True)
         longbridge = _DummyFetcher("LongbridgeFetcher", 5, result=_DummyQuote(), api_ready=True)
 
@@ -101,6 +160,55 @@ class TestHKRealtimeRouting(unittest.TestCase):
         self.assertEqual(yfinance.calls, [(("SPX",), {})])
         self.assertEqual(twelvedata.calls, [])
         self.assertEqual(longbridge.calls, [])
+
+    @patch("src.config.get_config")
+    def test_manager_supplements_us_quote_fields_from_later_fetcher(self, mock_get_config):
+        mock_get_config.return_value = SimpleNamespace(
+            enable_realtime_quote=True,
+            realtime_source_priority="tencent,akshare_sina,efinance,akshare_em,tushare",
+        )
+
+        twelvedata = _DummyFetcher(
+            "TwelveDataFetcher",
+            2,
+            result=_make_quote(
+                code="AAPL",
+                source=RealtimeSource.TWELVEDATA,
+                price=201.23,
+            ),
+            api_ready=True,
+        )
+        longbridge = _DummyFetcher(
+            "LongbridgeFetcher",
+            5,
+            result=_make_quote(
+                code="AAPL",
+                source=RealtimeSource.LONGBRIDGE,
+                price=201.23,
+                volume_ratio=0.75,
+                turnover_rate=1.62,
+                amplitude=1.3,
+                pe_ratio=28.0,
+                pb_ratio=12.5,
+                total_mv=1_000_000_000.0,
+                circ_mv=900_000_000.0,
+            ),
+            api_ready=True,
+        )
+        yfinance = _DummyFetcher("YfinanceFetcher", 0, result=_DummyQuote())
+
+        manager = DataFetcherManager(fetchers=[yfinance, longbridge, twelvedata])
+        quote = manager.get_realtime_quote("AAPL")
+
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote.source, RealtimeSource.TWELVEDATA)
+        self.assertEqual(quote.volume_ratio, 0.75)
+        self.assertEqual(quote.turnover_rate, 1.62)
+        self.assertEqual(quote.pe_ratio, 28.0)
+        self.assertEqual(quote.circ_mv, 900_000_000.0)
+        self.assertEqual(twelvedata.calls, [(("AAPL",), {})])
+        self.assertEqual(longbridge.calls, [(("AAPL",), {})])
+        self.assertEqual(yfinance.calls, [])
 
 
 if __name__ == "__main__":

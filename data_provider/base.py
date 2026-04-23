@@ -849,6 +849,123 @@ class DataFetcherManager:
             for fetcher in fetchers
         )
 
+    def _get_realtime_quote_from_fetcher_chain(
+        self,
+        stock_code: str,
+        fetchers: List[BaseFetcher],
+        *,
+        market_label: str,
+        log_final_failure: bool = True,
+    ):
+        """
+        Run a realtime quote fetcher chain with supplement-field merging.
+
+        For US/HK API chains we still want the first successful fetcher to own
+        the core price fields, but later sources should be allowed to fill
+        missing supplementary fields such as volume_ratio / turnover_rate.
+        """
+        if fetchers:
+            logger.info(
+                "[实时行情链路] %s %s 使用链路: %s",
+                market_label,
+                stock_code,
+                self._describe_fetcher_chain(fetchers),
+            )
+
+        errors = []
+        primary_quote = None
+        supplement_attempts = 0
+        total_fetchers = len(fetchers)
+
+        for attempt, fetcher in enumerate(fetchers, start=1):
+            if not hasattr(fetcher, 'get_realtime_quote'):
+                continue
+
+            try:
+                quote = fetcher.get_realtime_quote(stock_code)
+                if quote is not None and quote.has_basic_data():
+                    if primary_quote is None:
+                        primary_quote = quote
+                        logger.info(
+                            "[实时行情] %s %s 成功获取 (来源: %s)",
+                            market_label,
+                            stock_code,
+                            fetcher.name,
+                        )
+                        if not self._quote_needs_supplement(primary_quote):
+                            return primary_quote
+                        logger.debug(
+                            "[实时行情] %s %s 部分字段缺失，尝试从后续数据源补充",
+                            market_label,
+                            stock_code,
+                        )
+                    else:
+                        supplement_attempts += 1
+                        if supplement_attempts > 1:
+                            logger.debug(
+                                "[实时行情] %s %s 补充尝试已达上限，停止继续",
+                                market_label,
+                                stock_code,
+                            )
+                            break
+                        merged = self._merge_quote_fields(primary_quote, quote)
+                        if merged:
+                            logger.info(
+                                "[实时行情] %s %s 从 %s 补充了缺失字段: %s",
+                                market_label,
+                                stock_code,
+                                fetcher.name,
+                                merged,
+                            )
+                        if not self._quote_needs_supplement(primary_quote):
+                            break
+                    continue
+
+                error_reason = "返回为空或缺少基本价格字段"
+                logger.warning(
+                    "[实时行情] %s %s 获取失败 (%s): %s",
+                    market_label,
+                    stock_code,
+                    fetcher.name,
+                    error_reason,
+                )
+                errors.append(f"[{fetcher.name}] {error_reason}")
+            except Exception as e:
+                error_type, error_reason = summarize_exception(e)
+                logger.warning(
+                    "[实时行情] %s %s 获取失败 (%s): %s: %s",
+                    market_label,
+                    stock_code,
+                    fetcher.name,
+                    error_type,
+                    error_reason,
+                )
+                errors.append(f"[{fetcher.name}] {error_type}: {error_reason}")
+
+            if primary_quote is None and attempt < total_fetchers:
+                next_fetcher = fetchers[attempt]
+                logger.info(
+                    "[实时行情切换] %s %s: [%s] -> [%s]",
+                    market_label,
+                    stock_code,
+                    fetcher.name,
+                    next_fetcher.name,
+                )
+
+        if primary_quote is not None:
+            return primary_quote
+
+        if errors and log_final_failure:
+            logger.warning(
+                "[实时行情] %s %s 所有数据源均失败，降级处理: %s",
+                market_label,
+                stock_code,
+                "; ".join(errors),
+            )
+        elif log_final_failure:
+            logger.warning("[实时行情] %s %s 无可用数据源", market_label, stock_code)
+        return None
+
     def _get_us_index_fetcher_chain(self) -> List[BaseFetcher]:
         chain: List[BaseFetcher] = []
         for fetcher in self._named_fetchers("YfinanceFetcher", "LongbridgeFetcher"):
@@ -1139,117 +1256,32 @@ class DataFetcherManager:
         # 美股指数由 YfinanceFetcher 处理（在美股股票检查之前）
         if is_us_index_code(stock_code):
             index_fetchers = self._get_us_index_fetcher_chain()
-            if index_fetchers:
-                logger.info(
-                    "[实时行情链路] 美股指数 %s 使用链路: %s",
-                    stock_code,
-                    self._describe_fetcher_chain(index_fetchers),
-                )
-            total_index_fetchers = len(index_fetchers)
-            for attempt, fetcher in enumerate(index_fetchers, start=1):
-                if not hasattr(fetcher, 'get_realtime_quote'):
-                    continue
-                try:
-                    quote = fetcher.get_realtime_quote(stock_code)
-                    if quote is not None and quote.has_basic_data():
-                        logger.info(f"[实时行情] 美股指数 {stock_code} 成功获取 (来源: {fetcher.name})")
-                        return quote
-                    error_reason = "返回为空或缺少基本价格字段"
-                    logger.warning(f"[实时行情] 美股指数 {stock_code} 获取失败 ({fetcher.name}): {error_reason}")
-                except Exception as e:
-                    error_type, error_reason = summarize_exception(e)
-                    logger.warning(
-                        f"[实时行情] 美股指数 {stock_code} 获取失败 ({fetcher.name}): "
-                        f"{error_type}: {error_reason}"
-                    )
-                if attempt < total_index_fetchers:
-                    next_fetcher = index_fetchers[attempt]
-                    logger.info(
-                        "[实时行情切换] 美股指数 %s: [%s] -> [%s]",
-                        stock_code,
-                        fetcher.name,
-                        next_fetcher.name,
-                    )
-            if log_final_failure:
-                logger.warning(f"[实时行情] 美股指数 {stock_code} 无可用数据源")
-            return None
+            return self._get_realtime_quote_from_fetcher_chain(
+                stock_code,
+                index_fetchers,
+                market_label="美股指数",
+                log_final_failure=log_final_failure,
+            )
 
         # 美股个股使用 API 优先链，Yfinance 永远最后兜底。
         if _is_us_code(stock_code):
             us_fetchers = self._get_us_hk_priority_chain(stock_code)
-            if us_fetchers:
-                logger.info(
-                    "[实时行情链路] 美股 %s 使用链路: %s",
-                    stock_code,
-                    self._describe_fetcher_chain(us_fetchers),
-                )
-            total_us_fetchers = len(us_fetchers)
-            for attempt, fetcher in enumerate(us_fetchers, start=1):
-                if not hasattr(fetcher, 'get_realtime_quote'):
-                    continue
-                try:
-                    quote = fetcher.get_realtime_quote(stock_code)
-                    if quote is not None and quote.has_basic_data():
-                        logger.info(f"[实时行情] 美股 {stock_code} 成功获取 (来源: {fetcher.name})")
-                        return quote
-                    error_reason = "返回为空或缺少基本价格字段"
-                    logger.warning(f"[实时行情] 美股 {stock_code} 获取失败 ({fetcher.name}): {error_reason}")
-                except Exception as e:
-                    error_type, error_reason = summarize_exception(e)
-                    logger.warning(
-                        f"[实时行情] 美股 {stock_code} 获取失败 ({fetcher.name}): "
-                        f"{error_type}: {error_reason}"
-                    )
-                if attempt < total_us_fetchers:
-                    next_fetcher = us_fetchers[attempt]
-                    logger.info(
-                        "[实时行情切换] 美股 %s: [%s] -> [%s]",
-                        stock_code,
-                        fetcher.name,
-                        next_fetcher.name,
-                    )
-            if log_final_failure:
-                logger.warning(f"[实时行情] 美股 {stock_code} 无可用数据源")
-            return None
+            return self._get_realtime_quote_from_fetcher_chain(
+                stock_code,
+                us_fetchers,
+                market_label="美股",
+                log_final_failure=log_final_failure,
+            )
 
         # 港股个股使用 API 优先链，Yfinance 永远最后兜底。
         if _is_hk_market(stock_code):
             hk_fetchers = self._get_us_hk_priority_chain(stock_code)
-            if hk_fetchers:
-                logger.info(
-                    "[实时行情链路] 港股 %s 使用链路: %s",
-                    stock_code,
-                    self._describe_fetcher_chain(hk_fetchers),
-                )
-            total_hk_fetchers = len(hk_fetchers)
-            for attempt, fetcher in enumerate(hk_fetchers, start=1):
-                if not hasattr(fetcher, 'get_realtime_quote'):
-                    continue
-                try:
-                    quote = fetcher.get_realtime_quote(stock_code)
-                    if quote is not None and quote.has_basic_data():
-                        logger.info(f"[实时行情] 港股 {stock_code} 成功获取 (来源: {fetcher.name})")
-                        return quote
-                    error_reason = "返回为空或缺少基本价格字段"
-                    logger.warning(f"[实时行情] 港股 {stock_code} 获取失败 ({fetcher.name}): {error_reason}")
-                except Exception as e:
-                    error_type, error_reason = summarize_exception(e)
-                    logger.warning(
-                        f"[实时行情] 港股 {stock_code} 获取失败 ({fetcher.name}): "
-                        f"{error_type}: {error_reason}"
-                    )
-                if attempt < total_hk_fetchers:
-                    next_fetcher = hk_fetchers[attempt]
-                    logger.info(
-                        "[实时行情切换] 港股 %s: [%s] -> [%s]",
-                        stock_code,
-                        fetcher.name,
-                        next_fetcher.name,
-                    )
-
-            if log_final_failure:
-                logger.warning(f"[实时行情] 港股 {stock_code} 无可用数据源")
-            return None
+            return self._get_realtime_quote_from_fetcher_chain(
+                stock_code,
+                hk_fetchers,
+                market_label="港股",
+                log_final_failure=log_final_failure,
+            )
         
         # 获取配置的数据源优先级
         source_priority = config.realtime_source_priority.split(',')
