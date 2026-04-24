@@ -1484,7 +1484,7 @@ class AkshareFetcher(BaseFetcher):
             import time as _time
             api_start = _time.time()
             
-            df = ak.stock_cyq_em(symbol=stock_code)
+            df = ak.stock_cyq_em(symbol=stock_code,adjust="qfq")
             
             api_elapsed = _time.time() - api_start
             
