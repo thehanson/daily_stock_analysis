@@ -741,6 +741,26 @@ class StockAnalysisPipeline:
 
         return enhanced
 
+    def _ensure_agent_history(self, code: str, min_days: int = 240) -> None:
+        """Ensure at least *min_days* of K-line history is in DB for agent tools."""
+        from src.services.history_loader import get_frozen_target_date
+
+        target = get_frozen_target_date()
+        if target is None:
+            target = get_market_today(get_market_for_stock(code))
+        start = target - timedelta(days=int(min_days * 1.8))
+        bars = self.db.get_data_range(code, start, target)
+        if bars and len(bars) >= min(min_days, 200):
+            logger.debug("[%s] Agent history: %d bars in DB, sufficient", code, len(bars))
+            return
+        try:
+            df, source = self.fetcher_manager.get_daily_data(code, days=min_days)
+            if df is not None and not df.empty:
+                self.db.save_daily_data(df, code, source)
+                logger.info("[%s] Prefetched %d rows of history for agent (source: %s)", code, len(df), source)
+        except Exception as e:
+            logger.warning("[%s] Agent history prefetch failed: %s", code, e)
+
     def _analyze_with_agent(
         self, 
         code: str, 
@@ -805,6 +825,9 @@ class StockAnalysisPipeline:
                 initial_context["chip_distribution"] = self._safe_to_dict(chip_data)
             if trend_result:
                 initial_context["trend_result"] = self._safe_to_dict(trend_result)
+
+            # Issue #1066: ensure deep history is in DB before agent tools run
+            self._ensure_agent_history(code)
 
             # 运行 Agent
             message = f"请分析股票 {code} ({stock_name})，并生成决策仪表盘报告。"
@@ -1230,7 +1253,11 @@ class StockAnalysisPipeline:
 
         if not self._filter_supported_stock_codes([code]):
             return None
-        
+
+        from src.services.history_loader import set_frozen_target_date, reset_frozen_target_date
+        frozen_td = get_market_today(get_market_for_stock(code))
+        token = set_frozen_target_date(frozen_td)
+
         try:
             # Step 1: 获取并保存数据
             success, error = self.fetch_and_save_stock_data(code)
@@ -1285,12 +1312,14 @@ class StockAnalysisPipeline:
                         logger.error("[%s] 单股推送异常: %s", code, notify_err)
                 
             return result
-            
+
         except Exception as e:
             # 捕获所有异常，确保单股失败不影响整体
             logger.exception(f"[{code}] 处理过程发生未知异常: {e}")
             return None
-    
+        finally:
+            reset_frozen_target_date(token)
+
     def run(
         self,
         stock_codes: Optional[List[str]] = None,

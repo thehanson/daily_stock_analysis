@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
+- [修复] Pipeline Agent 5 个 K 线工具（get_daily_history / analyze_trend / calculate_ma / get_volume_analysis / analyze_pattern）改为 DB-first 加载，消除同一只股票 9x5=45 次重复 HTTP 请求 (Fixes upstream #1066)
+- [修复] Pipeline Agent 执行前按需预热 240 天 K 线历史到 DB，正常情况下 K 线工具调用无需重复网络请求
+- [修复] 冻结 target_date 通过 ContextVar 透传到 Pipeline Agent K 线工具线程，消除跨收盘边界时间漂移
 - [新功能] 支持通过 `DATABASE_URL` 环境变量直连外部云端数据库（如 Supabase PostgreSQL），解决本地与 GitHub Actions 之间的数据同步与持久化问题；未配置时自动回退至本地 SQLite。
 - [改进] Twelve Data 实时行情接入从 `price` 升级为 `quote`，美股/港股在免开户链路下可直接返回价格、涨跌幅、成交量、开高低昨收，并基于 Twelve Data 官方 `time_series` / `statistics` 接口补算量比与换手率（计划不支持时优雅降级为 `None`）。
 - [修复] 持仓管理页的持仓明细改为区分“本币现价/市值/未实现盈亏”和“基准币折算金额”，修复跨币种账户将本币现价与基准币市值混在同一口径下展示导致的误判；当缺少日线收盘价时，组合快照会优先尝试实时行情补价，并在仍无行情时明确标记“缺行情”，不再把成本价伪装成现价。
@@ -48,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] 澄清 README（中/英/繁）中长桥「首选 / 兜底 / 未配置不调用」的边界；`docs/README_EN.md` / `docs/README_CHT.md` 顶部导航与完整指南链接改为 `./` 相对路径，避免在文档子目录下解析错误；`LONGBRIDGE_PRINT_QUOTE_PACKAGES` 与代码及 `.env.example` 对齐为未设置时默认关闭。
 - [修复] SSE 任务流断开时 CancelledError 被静默吞掉问题 — 修复 SSE 流中断时异常未向上抛出导致故障无日志可查的问题，现在正确 re-raise CancelledError（fixes #967）
 - [修复] Agent SSE 流清理阶段静默吞掉后台执行器异常 — 流结束时后台任务异常现在正确记录并上报，避免错误无法感知（fixes #969）
+- [文档] 新增数据源优先级与降级策略完整文档（`docs/DATA_SOURCE_PRIORITY.md`），详细说明 A 股/美股/港股的数据源选择逻辑、故障切换机制、字段补充策略以及不同部署场景的最佳实践
 - [文档] FAQ 补充 Ollama `OllamaException / APIConnectionError` 连接失败排障条目（Q12c），覆盖服务未启动、URL 配置错误、模型前缀缺失、模型未下载、远程防火墙等 5 个检查点
 - [修复] 技能加载异常被静默吞没问题 — 在 ask.py、skills/aggregator.py、skills/router.py 的静默 except 块补充 logger.warning 日志，确保技能列表为空时有日志可查（fixes #970）
 - [改进] Tushare 港股数据接入 — `TushareFetcher` 新增 `_convert_hk_stock_code_for_tushare` 方法（支持 HK00700/00700.HK/00700 等多格式归一为 nnnnn.HK）；`_fetch_raw_data` 对港股改用 `hk_daily` 接口；`_normalize_data` 对港股跳过 vol/amount 的「手→股/千元→元」单位缩放；`get_stock_name` 对港股使用 `hk_basic` 接口；补充配套单元测试（tests/test_tushare_fetcher_get_stock_list.py）

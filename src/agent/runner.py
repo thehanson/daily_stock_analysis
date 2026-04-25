@@ -15,6 +15,7 @@ Design goals:
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
@@ -573,7 +574,7 @@ def _execute_tools(
                 progress_callback({"type": "tool_start", "step": step, "tool": tc.name})
 
         with ThreadPoolExecutor(max_workers=min(len(tool_calls), 5)) as pool:
-            futures = {pool.submit(_exec_single, tc): tc for tc in tool_calls}
+            futures = {pool.submit(contextvars.copy_context().run, _exec_single, tc): tc for tc in tool_calls}
             for future in as_completed(futures):
                 tc_item, result_str, success, dur, cached = future.result()
                 if progress_callback:
