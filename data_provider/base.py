@@ -1462,8 +1462,8 @@ class DataFetcherManager:
 
         # 定义筹码数据源优先级列表
         chip_sources = [
-            ("AkshareFetcher", "akshare_chip"),
             ("TushareFetcher", "tushare_chip"),
+            ("AkshareFetcher", "akshare_chip"),
             ("EfinanceFetcher", "efinance_chip"),
         ]
 
