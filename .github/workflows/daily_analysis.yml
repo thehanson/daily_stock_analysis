@@ -6,7 +6,8 @@ on:
   # 这里同时监听美东 09:30 的两种 UTC 映射：
   # - 夏令时：UTC 13:30 = 北京时间 21:30
   # - 冬令时：UTC 14:30 = 北京时间 22:30
-  # 后续通过 America/New_York 本地时间窗口判断，只允许真实的 09:30-10:00 开盘窗口继续执行。
+  # GitHub Actions 可能排队延迟启动；后续按 cron 计划和纽约时区判断，
+  # 只允许对应季节的开盘后触发继续执行，避免备用 cron 重复运行。
   schedule:
     - cron: '30 13 * * 1-5'
     - cron: '30 14 * * 1-5'
@@ -41,24 +42,29 @@ jobs:
     timeout-minutes: ${{ fromJSON(vars.ANALYSIS_TIMEOUT_MINUTES || '90') }}
     
     steps:
-      - name: 校验定时窗口（夏令时/冬令时）
+      - name: 校验开盘后定时触发（夏令时/冬令时）
         id: schedule_gate
         if: github.event_name == 'schedule'
         run: |
+          scheduled_cron="${{ github.event.schedule }}"
           ny_now="$(TZ='America/New_York' date '+%Y-%m-%d %H:%M:%S %Z')"
-          ny_hm="$(TZ='America/New_York' date '+%H:%M')"
+          ny_zone="$(TZ='America/New_York' date '+%Z')"
           ny_weekday="$(TZ='America/New_York' date '+%u')"
 
-          echo "🕘 New York local time: $ny_now"
+          echo "🕘 New York local time at runner start: $ny_now"
+          echo "🧭 Scheduled cron: $scheduled_cron"
 
           should_run=false
-          if [[ "$ny_weekday" -ge 1 && "$ny_weekday" -le 5 && "$ny_hm" > "09:29" && "$ny_hm" < "10:01" ]]; then
+          if [[ "$ny_weekday" -ge 1 && "$ny_weekday" -le 5 && "$scheduled_cron" == "30 13 * * 1-5" && "$ny_zone" == "EDT" ]]; then
+            should_run=true
+          elif [[ "$ny_weekday" -ge 1 && "$ny_weekday" -le 5 && "$scheduled_cron" == "30 14 * * 1-5" && "$ny_zone" == "EST" ]]; then
             should_run=true
           fi
 
           echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
           if [[ "$should_run" != "true" ]]; then
-            echo "ℹ️ 当前不在美东 09:30-10:00 开盘窗口内，跳过本次触发。"
+            echo "ℹ️ 当前 cron 与美东开盘后目标时段不匹配，跳过本次触发。"
+            echo "ℹ️ 目标时段：夏令时北京时间 21:30-22:00（美东 09:30-10:00）；冬令时北京时间 22:30-23:00（美东 09:30-10:00）。"
           fi
 
       - name: 随机延迟（避免固定时间访问）
