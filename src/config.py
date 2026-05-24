@@ -138,6 +138,43 @@ def parse_env_float(
     return parsed
 
 
+def parse_env_headers(value: Optional[str], *, field_name: str) -> Dict[str, str]:
+    """Parse a JSON object env value into HTTP headers."""
+    if value is None or not value.strip():
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        logger.warning("%s is not valid JSON; ignoring extra headers", field_name)
+        return {}
+    if not isinstance(payload, dict):
+        logger.warning("%s must be a JSON object; ignoring extra headers", field_name)
+        return {}
+
+    headers: Dict[str, str] = {}
+    for key, raw_header_value in payload.items():
+        header_name = str(key).strip()
+        if not header_name or raw_header_value is None:
+            continue
+        headers[header_name] = str(raw_header_value)
+    return headers
+
+
+def build_openai_compatible_headers(
+    *,
+    base_url: Optional[str] = None,
+    global_headers: Optional[Dict[str, str]] = None,
+    channel_headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Merge explicit headers for OpenAI-compatible LLM endpoints."""
+    headers: Dict[str, str] = {}
+    headers.update(global_headers or {})
+    headers.update(channel_headers or {})
+    if base_url and "aihubmix.com" in base_url:
+        headers.setdefault("APP-Code", "GPIJ3886")
+    return headers
+
+
 def normalize_news_strategy_profile(value: Optional[str]) -> str:
     """Normalize news strategy profile to known values."""
     candidate = (value or "short").strip().lower()
@@ -444,6 +481,8 @@ class Config:
     llm_channels: List[Dict[str, Any]] = field(default_factory=list)
     # Pre-built LiteLLM Router model_list (populated from channels, YAML, or legacy keys)
     llm_model_list: List[Dict[str, Any]] = field(default_factory=list)
+    # Explicit global HTTP headers for OpenAI-compatible LLM relays.
+    llm_extra_headers: Dict[str, str] = field(default_factory=dict)
 
     # Multi-key support: each list is parsed from *_API_KEYS (comma-separated) with single-key fallback
     gemini_api_keys: List[str] = field(default_factory=list)
@@ -964,13 +1003,17 @@ class Config:
 
         # === LLM Channels + YAML config ===
         litellm_config_path = os.getenv('LITELLM_CONFIG', '').strip() or None
+        llm_extra_headers = parse_env_headers(
+            os.getenv('LLM_EXTRA_HEADERS'),
+            field_name='LLM_EXTRA_HEADERS',
+        )
         llm_models_source = "legacy_env"
         llm_channels: List[Dict[str, Any]] = []
         llm_model_list: List[Dict[str, Any]] = []
 
         # Priority 1: LITELLM_CONFIG (standard LiteLLM YAML config file)
         if litellm_config_path:
-            llm_model_list = cls._parse_litellm_yaml(litellm_config_path)
+            llm_model_list = cls._parse_litellm_yaml(litellm_config_path, llm_extra_headers)
             if llm_model_list:
                 llm_models_source = "litellm_config"
 
@@ -979,7 +1022,7 @@ class Config:
             _channels_str = os.getenv('LLM_CHANNELS', '').strip()
             if _channels_str:
                 llm_channels = cls._parse_llm_channels(_channels_str)
-                llm_model_list = cls._channels_to_model_list(llm_channels)
+                llm_model_list = cls._channels_to_model_list(llm_channels, llm_extra_headers)
                 if llm_model_list:
                     llm_models_source = "llm_channels"
 
@@ -991,6 +1034,7 @@ class Config:
                     'https://aihubmix.com/v1' if os.getenv('AIHUBMIX_KEY') else None
                 ),
                 deepseek_api_keys,
+                llm_extra_headers,
             )
             if llm_model_list:
                 llm_models_source = "legacy_env"
@@ -1093,6 +1137,7 @@ class Config:
             llm_models_source=llm_models_source,
             llm_channels=llm_channels,
             llm_model_list=llm_model_list,
+            llm_extra_headers=llm_extra_headers,
             gemini_api_keys=gemini_api_keys,
             anthropic_api_keys=anthropic_api_keys,
             openai_api_keys=openai_api_keys,
@@ -1360,7 +1405,11 @@ class Config:
         )
 
     @classmethod
-    def _parse_litellm_yaml(cls, config_path: str) -> List[Dict[str, Any]]:
+    def _parse_litellm_yaml(
+        cls,
+        config_path: str,
+        global_extra_headers: Optional[Dict[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Parse a standard LiteLLM config YAML file into Router model_list.
 
         Supports the ``os.environ/VAR_NAME`` syntax for secret references.
@@ -1396,11 +1445,23 @@ class Config:
         # Resolve os.environ/ references in string params
         for entry in model_list:
             params = entry.get('litellm_params', {})
+            if not isinstance(params, dict):
+                continue
             for key in list(params.keys()):
                 val = params.get(key)
                 if isinstance(val, str) and val.startswith('os.environ/'):
                     env_name = val.split('/', 1)[1]
                     params[key] = os.getenv(env_name, '')
+            model = str(params.get('model') or entry.get('model_name') or '')
+            if _get_litellm_provider(model) == 'openai':
+                yaml_headers = params.get('extra_headers') if isinstance(params.get('extra_headers'), dict) else {}
+                headers = build_openai_compatible_headers(
+                    base_url=params.get('api_base'),
+                    global_headers=global_extra_headers,
+                    channel_headers=yaml_headers,
+                )
+                if headers:
+                    params['extra_headers'] = headers
 
         _logger.info(f"LITELLM_CONFIG: loaded {len(model_list)} model deployment(s) from {path}")
         return model_list
@@ -1447,12 +1508,10 @@ class Config:
 
             # Extra headers (JSON string, optional)
             extra_headers_raw = os.getenv(f'LLM_{ch_upper}_EXTRA_HEADERS', '').strip()
-            extra_headers = None
-            if extra_headers_raw:
-                try:
-                    extra_headers = json.loads(extra_headers_raw)
-                except json.JSONDecodeError:
-                    _logger.warning(f"LLM_{ch_upper}_EXTRA_HEADERS: invalid JSON, ignored")
+            extra_headers = parse_env_headers(
+                extra_headers_raw,
+                field_name=f'LLM_{ch_upper}_EXTRA_HEADERS',
+            )
 
             if not enabled:
                 _logger.info(f"LLM channel '{ch_name}': disabled, skipped")
@@ -1490,7 +1549,11 @@ class Config:
         return channels
 
     @classmethod
-    def _channels_to_model_list(cls, channels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _channels_to_model_list(
+        cls,
+        channels: List[Dict[str, Any]],
+        global_extra_headers: Optional[Dict[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Convert parsed LLM channels to LiteLLM Router model_list format."""
         model_list: List[Dict[str, Any]] = []
         for ch in channels:
@@ -1503,10 +1566,17 @@ class Config:
                         litellm_params['api_key'] = api_key
                     if ch['base_url']:
                         litellm_params['api_base'] = ch['base_url']
-                    # Auto-inject aihubmix sponsored header
-                    headers = dict(ch.get('extra_headers') or {})
-                    if ch['base_url'] and 'aihubmix.com' in ch['base_url']:
-                        headers.setdefault('APP-Code', 'GPIJ3886')
+                    channel_headers = dict(ch.get('extra_headers') or {})
+                    if ch.get('protocol') == 'openai':
+                        headers = build_openai_compatible_headers(
+                            base_url=ch['base_url'],
+                            global_headers=global_extra_headers,
+                            channel_headers=channel_headers,
+                        )
+                    else:
+                        headers = channel_headers
+                        if ch['base_url'] and 'aihubmix.com' in ch['base_url']:
+                            headers.setdefault('APP-Code', 'GPIJ3886')
                     if headers:
                         litellm_params['extra_headers'] = headers
 
@@ -1524,6 +1594,7 @@ class Config:
         openai_keys: List[str],
         openai_base_url: Optional[str],
         deepseek_keys: Optional[List[str]] = None,
+        llm_extra_headers: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, Any]]:
         """Build Router model_list from legacy per-provider keys (backward compat).
 
@@ -1556,8 +1627,12 @@ class Config:
                 params: Dict[str, Any] = {'model': '__legacy_openai__', 'api_key': k}
                 if openai_base_url:
                     params['api_base'] = openai_base_url
-                if openai_base_url and 'aihubmix.com' in openai_base_url:
-                    params['extra_headers'] = {'APP-Code': 'GPIJ3886'}
+                headers = build_openai_compatible_headers(
+                    base_url=openai_base_url,
+                    global_headers=llm_extra_headers,
+                )
+                if headers:
+                    params['extra_headers'] = headers
                 model_list.append({
                     'model_name': '__legacy_openai__',
                     'litellm_params': params,
@@ -2037,8 +2112,12 @@ def extra_litellm_params(model: str, config: Config) -> Dict[str, Any]:
     if model.startswith("openai/") or "/" not in model:
         if config.openai_base_url:
             params["api_base"] = config.openai_base_url
-        if config.openai_base_url and "aihubmix.com" in config.openai_base_url:
-            params["extra_headers"] = {"APP-Code": "GPIJ3886"}
+        headers = build_openai_compatible_headers(
+            base_url=config.openai_base_url,
+            global_headers=getattr(config, "llm_extra_headers", None),
+        )
+        if headers:
+            params["extra_headers"] = headers
     return params
 
 

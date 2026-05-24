@@ -34,6 +34,12 @@ OPENAI_BASE_URL=https://api.siliconflow.cn/v1
 LITELLM_MODEL=openai/deepseek-ai/DeepSeek-V3 
 ```
 
+如果中转站会拦截默认客户端请求，可显式添加请求头；不使用中转站或官方 API 正常可用时保持为空：
+
+```env
+LLM_EXTRA_HEADERS={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"}
+```
+
 ### 示例 2：使用 DeepSeek 官方接口
 ```env
 # 填入你在 DeepSeek 官方平台申请的 API Key
@@ -77,6 +83,8 @@ LLM_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner
 LLM_AIHUBMIX_BASE_URL=https://api.aihubmix.com/v1
 LLM_AIHUBMIX_API_KEY=sk-2222222222222
 LLM_AIHUBMIX_MODELS=gpt-4o-mini,claude-3-5-sonnet
+# 可选：仅当该渠道需要额外请求头时填写；同名字段会覆盖 LLM_EXTRA_HEADERS
+# LLM_AIHUBMIX_EXTRA_HEADERS={"User-Agent":"Mozilla/5.0 ..."}
 
 # 4. 【关键】指定主模型和备用模型列表
 # 平时首选用 deepseek 这款模型：

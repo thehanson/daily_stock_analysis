@@ -154,6 +154,7 @@ Default schedule: automatically runs during the **New York 09:30-10:00 post-open
 | `LITELLM_MODEL` | Primary model, format `provider/model` (e.g. `gemini/gemini-2.5-flash`), recommended | - | No |
 | `LITELLM_FALLBACK_MODELS` | Fallback models, comma-separated | - | No |
 | `LLM_CHANNELS` | Channel names (comma-separated), use with `LLM_{NAME}_*`, see [LLM Config Guide](LLM_CONFIG_GUIDE_EN.md) | - | No |
+| `LLM_EXTRA_HEADERS` | Extra headers for OpenAI-compatible relays as a JSON object; leave empty to inject nothing, channel-level `LLM_{NAME}_EXTRA_HEADERS` overrides matching keys | - | No |
 | `LITELLM_CONFIG` | LiteLLM YAML config path (advanced) | - | No |
 | `GEMINI_API_KEY` | Google Gemini API Key | - | Optional |
 | `GEMINI_MODEL` | Primary model name (legacy, `LITELLM_MODEL` preferred) | `gemini-3-flash-preview` | No |
