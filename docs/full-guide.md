@@ -150,7 +150,7 @@ daily_stock_analysis/
 
 ### 5. 完成！
 
-默认会在 **美东 09:30-10:00 开盘窗口** 自动执行，对应北京时间通常为 **夏令时 21:30 左右，冬令时 22:30 左右**。
+默认会在 **美东 09:30-10:00 开盘后窗口** 自动执行，对应北京时间通常为 **夏令时 21:30-22:00，冬令时 22:30-23:00**。GitHub Actions 可能排队延迟启动，工作流会按计划 cron 与美东夏令/冬令状态判定，避免原本 09:30 的任务因实际启动较晚而误跳过。
 
 ---
 
@@ -165,6 +165,7 @@ daily_stock_analysis/
 | `LITELLM_MODEL` | 主模型，格式 `provider/model`（如 `gemini/gemini-2.5-flash`），推荐优先使用 | - | 否 |
 | `LITELLM_FALLBACK_MODELS` | 备选模型，逗号分隔 | - | 否 |
 | `LLM_CHANNELS` | 渠道名称列表（逗号分隔），配合 `LLM_{NAME}_*` 使用，详见 [LLM 配置指南](LLM_CONFIG_GUIDE.md) | - | 否 |
+| `LLM_EXTRA_HEADERS` | OpenAI 兼容中转站额外请求头，JSON 对象；留空则不注入，渠道级 `LLM_{NAME}_EXTRA_HEADERS` 可覆盖同名字段 | - | 否 |
 | `LITELLM_CONFIG` | LiteLLM YAML 配置文件路径（高级） | - | 否 |
 | `AIHUBMIX_KEY` | [AIHubmix](https://aihubmix.com/?aff=CfMq) API Key，一 Key 切换使用全系模型，无需额外配置 Base URL | - | 可选 |
 | `GEMINI_API_KEY` | Google Gemini API Key | - | 可选 |
@@ -425,9 +426,9 @@ python main.py --workers 5            # 指定并发数
 ```yaml
 schedule:
   # GitHub Actions 仅支持 UTC；若要跟随美东夏令时/冬令时切换，
-  # 需要同时声明两个 cron，再在工作流里按 America/New_York 本地时间做窗口判断。
-  - cron: '30 13 * * 1-5'  # 夏令时：北京时间 21:30
-  - cron: '30 14 * * 1-5'  # 冬令时：北京时间 22:30
+  # 需要同时声明两个 cron，再在工作流里按计划 cron 和美东时区状态判断。
+  - cron: '30 13 * * 1-5'  # 夏令时：北京时间 21:30-22:00 开盘后窗口
+  - cron: '30 14 * * 1-5'  # 冬令时：北京时间 22:30-23:00 开盘后窗口
 ```
 
 常用固定北京时间对照：
@@ -444,7 +445,7 @@ schedule:
 
 | 目标窗口 | cron 配置 | 备注 |
 |---------|-----------|------|
-| 美东 09:30-10:00 | `'30 13 * * 1-5'` + `'30 14 * * 1-5'` | 夏令时约北京时间 21:30，冬令时约北京时间 22:30；需配合工作流内时区判断避免重复运行 |
+| 美东 09:30-10:00 | `'30 13 * * 1-5'` + `'30 14 * * 1-5'` | 夏令时对应北京时间 21:30-22:00，冬令时对应 22:30-23:00；工作流按计划 cron 与美东夏令/冬令状态判断，避免备用 cron 重复运行，也避免 runner 延迟启动时误跳过 |
 
 #### GitHub Actions 非交易日手动运行（Issue #461 / #466）
 

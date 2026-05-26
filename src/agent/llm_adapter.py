@@ -277,11 +277,11 @@ class LLMToolAdapter:
         so the Router can be re-initialized without restarting the process.
         """
         model_list = getattr(config, 'llm_model_list', None) or []
-        models_tuple = tuple(
-            e.get('litellm_params', {}).get('model', '')
+        params_tuple = tuple(
+            json.dumps(e.get('litellm_params', {}), sort_keys=True, default=str)
             for e in model_list
         )
-        return (getattr(config, 'litellm_model', '') or '', models_tuple)
+        return (getattr(config, 'litellm_model', '') or '', params_tuple)
 
     def _maybe_reinit_router(self) -> None:
         """Re-initialize Router if runtime config has changed (Issue #152).
@@ -293,14 +293,15 @@ class LLMToolAdapter:
         """
         fresh_config = get_config()
         current_sig = self._compute_config_signature(fresh_config)
-        if self._config_signature is not None and current_sig != self._config_signature:
+        previous_sig = getattr(self, "_config_signature", None)
+        if previous_sig is not None and current_sig != previous_sig:
             logger.info("[Issue #152] Agent LLM config changed, re-initializing Router...")
             self._config = fresh_config
             self._router = None
             self._litellm_available = False
             self._init_litellm()
             # _init_litellm updates _config_signature internally
-        else:
+        elif previous_sig is not None:
             # Even if signature unchanged, refresh cached config reference
             self._config = fresh_config
 

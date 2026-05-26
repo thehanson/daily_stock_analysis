@@ -191,6 +191,21 @@ class TestCallLitellmVision:
             assert kwargs["api_base"] == "https://aihubmix.com/v1"
             assert kwargs["extra_headers"]["APP-Code"] == "GPIJ3886"
 
+    def test_openai_model_uses_global_extra_headers(self):
+        cfg = _cfg(
+            openai_vision_model="openai/gpt-4o-mini",
+            openai_api_keys=[_OPENAI_KEY],
+            openai_base_url="https://relay.example.com/v1",
+            llm_extra_headers={"User-Agent": "Mozilla/5.0 test"},
+        )
+        with patch("src.services.image_stock_extractor.get_config", return_value=cfg), \
+             patch("src.services.image_stock_extractor.litellm.completion",
+                   return_value=self._good_response()) as mock_comp:
+            _call_litellm_vision("b64", "image/jpeg")
+            kwargs = mock_comp.call_args[1]
+            assert kwargs["api_base"] == "https://relay.example.com/v1"
+            assert kwargs["extra_headers"]["User-Agent"] == "Mozilla/5.0 test"
+
     def test_raises_when_model_not_configured(self):
         cfg = _cfg(openai_vision_model=None, litellm_model="", gemini_api_keys=[], anthropic_api_keys=[], openai_api_keys=[])
         with patch("src.services.image_stock_extractor.get_config", return_value=cfg):

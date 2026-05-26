@@ -34,6 +34,12 @@ OPENAI_BASE_URL=https://api.siliconflow.cn/v1
 LITELLM_MODEL=openai/deepseek-ai/DeepSeek-V3 
 ```
 
+If a relay blocks default client requests, explicitly add headers. Leave this empty for official APIs or relays that do not need it:
+
+```env
+LLM_EXTRA_HEADERS={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"}
+```
+
 ### Example 2: Using the Official DeepSeek API
 ```env
 # Fill in the API Key requested from the official DeepSeek platform
@@ -77,6 +83,8 @@ LLM_DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner
 LLM_AIHUBMIX_BASE_URL=https://api.aihubmix.com/v1
 LLM_AIHUBMIX_API_KEY=sk-2222222222222
 LLM_AIHUBMIX_MODELS=gpt-4o-mini,claude-3-5-sonnet
+# Optional: only when this channel needs extra headers; matching keys override LLM_EXTRA_HEADERS
+# LLM_AIHUBMIX_EXTRA_HEADERS={"User-Agent":"Mozilla/5.0 ..."}
 
 # 4. [Key Step] Specify the primary model and fallback list
 # Set your primary model:

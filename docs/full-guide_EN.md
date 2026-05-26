@@ -139,7 +139,7 @@ To get started quickly, you need at minimum:
 
 ### 5. Done!
 
-Default schedule: automatically run during the **New York 09:30-10:00 market-open window**, usually **21:30 Beijing during DST** and **22:30 Beijing during standard time**.
+Default schedule: automatically runs during the **New York 09:30-10:00 post-open window**, usually **21:30-22:00 Beijing during DST** and **22:30-23:00 Beijing during standard time**. GitHub Actions may start scheduled jobs late, so the workflow gates by scheduled cron intent and New York DST/standard-time state instead of the runner's delayed start minute.
 
 ---
 
@@ -154,6 +154,7 @@ Default schedule: automatically run during the **New York 09:30-10:00 market-ope
 | `LITELLM_MODEL` | Primary model, format `provider/model` (e.g. `gemini/gemini-2.5-flash`), recommended | - | No |
 | `LITELLM_FALLBACK_MODELS` | Fallback models, comma-separated | - | No |
 | `LLM_CHANNELS` | Channel names (comma-separated), use with `LLM_{NAME}_*`, see [LLM Config Guide](LLM_CONFIG_GUIDE_EN.md) | - | No |
+| `LLM_EXTRA_HEADERS` | Extra headers for OpenAI-compatible relays as a JSON object; leave empty to inject nothing, channel-level `LLM_{NAME}_EXTRA_HEADERS` overrides matching keys | - | No |
 | `LITELLM_CONFIG` | LiteLLM YAML config path (advanced) | - | No |
 | `GEMINI_API_KEY` | Google Gemini API Key | - | Optional |
 | `GEMINI_MODEL` | Primary model name (legacy, `LITELLM_MODEL` preferred) | `gemini-3-flash-preview` | No |
@@ -369,10 +370,10 @@ Edit `.github/workflows/daily_analysis.yml`:
 ```yaml
 schedule:
   # GitHub Actions only supports UTC. To follow the New York market open
-  # across DST changes, declare both UTC candidates and gate by
-  # America/New_York local time inside the workflow.
-  - cron: '30 13 * * 1-5'   # DST: 21:30 Beijing Time
-  - cron: '30 14 * * 1-5'   # Standard time: 22:30 Beijing Time
+  # across DST changes, declare both UTC candidates and gate by the
+  # scheduled cron intent plus the America/New_York DST/standard-time state.
+  - cron: '30 13 * * 1-5'   # DST: 21:30-22:00 Beijing post-open window
+  - cron: '30 14 * * 1-5'   # Standard time: 22:30-23:00 Beijing post-open window
 ```
 
 Common fixed Beijing-time reference:
@@ -389,7 +390,7 @@ For an automatic US market open window that follows DST, use:
 
 | Target window | Cron configuration | Notes |
 |---------|----------------|------|
-| New York 09:30-10:00 | `'30 13 * * 1-5'` + `'30 14 * * 1-5'` | About 21:30 Beijing during DST and 22:30 Beijing during standard time; add workflow-side timezone gating to avoid duplicate runs |
+| New York 09:30-10:00 | `'30 13 * * 1-5'` + `'30 14 * * 1-5'` | 21:30-22:00 Beijing during DST and 22:30-23:00 during standard time; the workflow gates by scheduled cron intent and New York DST/standard-time state, avoiding duplicate backup cron runs and delayed-runner false skips |
 
 ### Local Scheduled Tasks
 

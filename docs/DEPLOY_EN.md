@@ -400,20 +400,20 @@ git push
 
 ### Schedule Details
 
-Default configuration now follows the **New York 09:30-10:00 market-open window**, which is usually **21:30 Beijing during DST** and **22:30 Beijing during standard time**.
+Default configuration now follows the **New York 09:30-10:00 post-open window**, which is usually **21:30-22:00 Beijing during DST** and **22:30-23:00 Beijing during standard time**. GitHub Actions may start scheduled jobs late, so the workflow gates by scheduled cron intent and New York DST/standard-time state instead of the runner's delayed start minute.
 
 Modify time: Edit cron expression in `.github/workflows/daily_analysis.yml`:
 
 ```yaml
 schedule:
-  - cron: '30 13 * * 1-5'  # DST candidate: 21:30 Beijing time
-  - cron: '30 14 * * 1-5'  # Standard-time candidate: 22:30 Beijing time
+  - cron: '30 13 * * 1-5'  # DST candidate: 21:30-22:00 Beijing time
+  - cron: '30 14 * * 1-5'  # Standard-time candidate: 22:30-23:00 Beijing time
 ```
 
 Common cron examples:
 | Expression | Description |
 |--------|------|
-| `'30 13 * * 1-5'` + `'30 14 * * 1-5'` | New York 09:30-10:00 open window (about 21:30 Beijing during DST, 22:30 during standard time; add workflow-side timezone gating) |
+| `'30 13 * * 1-5'` + `'30 14 * * 1-5'` | New York 09:30-10:00 post-open window (21:30-22:00 Beijing during DST, 22:30-23:00 during standard time; the workflow gates by scheduled cron intent and New York DST/standard-time state) |
 | `'0 10 * * 1-5'` | Mon-Fri 18:00 (Beijing) |
 | `'30 7 * * 1-5'` | Mon-Fri 15:30 (Beijing) |
 | `'0 10 * * *'` | Daily 18:00 (Beijing) |
